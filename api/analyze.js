@@ -2,11 +2,9 @@
 // Serverless function: receives resume + JD, calls Anthropic, returns analysis.
 // Your ANTHROPIC_API_KEY lives in Vercel env vars — never exposed to the browser.
 
-// Simple in-memory rate limiter (resets on cold start, which is fine for a personal tool).
-// For heavier traffic, swap to Vercel KV / Upstash Redis.
 const buckets = new Map();
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
-const MAX_PER_IP = 8;             // 8 analyses per IP per hour
+const MAX_PER_IP = 8;
 
 function rateLimited(ip) {
   const now = Date.now();
@@ -17,20 +15,18 @@ function rateLimited(ip) {
   return false;
 }
 
-const MAX_RESUME_CHARS = 25000; // ~5 page resume, generous
-const MAX_JD_CHARS     = 18000; // very long JD
+const MAX_RESUME_CHARS = 25000;
+const MAX_JD_CHARS     = 18000;
 const MIN_RESUME_CHARS = 200;
 const MIN_JD_CHARS     = 80;
 
 export default async function handler(req, res) {
-  // CORS — same-origin only on Vercel, but headers don't hurt
   res.setHeader("Content-Type", "application/json");
 
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  // IP for rate limiting
   const ip =
     req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
     req.headers["x-real-ip"] ||
@@ -42,7 +38,6 @@ export default async function handler(req, res) {
     });
   }
 
-  // Parse + validate input
   const { resumeText, jdText } = req.body || {};
   if (typeof resumeText !== "string" || typeof jdText !== "string") {
     return res.status(400).json({ error: "Invalid payload." });
@@ -87,19 +82,25 @@ Return ONLY a single valid JSON object (no markdown fences, no commentary, no pr
   "tailoredSummary": "<2-3 sentence professional summary tailored to THIS role. Strategy-forward and leadership-facing. Concise narrative hook, not a restatement of bullet metrics. No clichés like 'passionate', 'thrilled', 'leverage', 'dynamic', 'results-driven', 'proven track record'.>",
   "rewrittenBullets": [
     {
-      "original": "<a real weak/generic bullet copied from the resume>",
+      "original": "<a real bullet copied verbatim from the resume>",
       "rewritten": "<stronger version: action verb + quantified outcome + JD-aligned keyword. Plain confident language. No clichés.>"
     }
   ],
   "coverLetter": "<250-300 words. First person. Plain conversational language a competent senior professional would actually write. NO 'I am writing to', NO 'I am thrilled', NO 'leverage', NO 'dynamic', NO 'passionate', NO 'results-driven'. Open with a specific hook tied to the role/company. Body proves fit with 2-3 concrete achievements pulled from the resume. Close with a clear next step. Use line breaks between paragraphs.>"
 }
 
-Rules:
-- rewrittenBullets array must contain 4-6 entries.
-- Pull rewrittenBullets.original verbatim from the resume — do not invent.
+CRITICAL RULES FOR rewrittenBullets:
+- Include EVERY bullet point from the resume — every single one, no exceptions, no skipping.
+- A "bullet" is any standalone achievement/responsibility line under a job, project, or experience section. Includes both bulleted items and short standalone sentences that describe what was done in a role.
+- Do NOT include section headers, job titles, dates, contact info, education degree lines, or skills lists as bullets. Only achievement/responsibility statements.
+- For each bullet, "original" must be copied verbatim from the resume — do not paraphrase, do not invent, do not combine bullets.
+- "rewritten" must improve the bullet by: leading with a strong action verb, quantifying impact where the original didn't, and weaving in JD-aligned keywords where natural. If the original is already strong, still produce a tightened version.
+- Preserve the order in which bullets appear in the resume.
+
+Other rules:
 - missingKeywords must come from the JD.
 - Be ruthless on the score: only excellent matches earn 85+.
-- Output JSON only.`;
+- Output JSON only — no markdown, no explanation, no preamble.`;
 
   try {
     const apiRes = await fetch("https://api.anthropic.com/v1/messages", {
@@ -111,7 +112,7 @@ Rules:
       },
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
-        max_tokens: 4000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }]
       })
     });
