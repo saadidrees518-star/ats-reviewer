@@ -1,0 +1,9 @@
+{
+  "name": "ats-reviewer",
+  "version": "1.0.0",
+  "description": "An ATS resume reviewer powered by Claude.",
+  "private": true,
+  "engines": {
+    "node": ">=18.x"
+  }
+}
